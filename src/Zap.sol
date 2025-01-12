@@ -68,26 +68,22 @@ contract Zap is ReentrancyGuard{
     uint256 _minTokenAmount,
     address _token,
     bool _toETH
-) public nonReentrant isDFXCurve(_curve) returns (uint256) {
-    address wETH = ICurve(_curve).getWeth();
-    IERC20Metadata base = IERC20Metadata(Curve(payable(_curve)).numeraires(0));
-    IERC20Metadata quote = IERC20Metadata(Curve(payable(_curve)).numeraires(1));
-    require(_token == address(base) || _token == address(quote), "zap/token-not-supported");
+        ) public isDFXCurve(_curve) nonReentrant returns (uint256) {
+    // Checks
+        address wETH = ICurve(_curve).getWeth();
+        IERC20Metadata base = IERC20Metadata(Curve(payable(_curve)).numeraires(0));
+        IERC20Metadata quote = IERC20Metadata(Curve(payable(_curve)).numeraires(1));
+        require(_token == address(base) || _token == address(quote), "zap/token-not-supported");
 
-    // Transfer LP tokens to this contract
-    IERC20Metadata(_curve).safeTransferFrom(msg.sender, address(this), _lpAmount);
+    // Effects
+        IERC20Metadata(_curve).safeTransferFrom(msg.sender, address(this), _lpAmount);
+        Curve(payable(_curve)).withdraw(_lpAmount, _deadline);
 
-    // Withdraw underlying tokens from the curve
-    Curve(payable(_curve)).withdraw(_lpAmount, _deadline);
-
+    // Interaction
     if (_token == address(base)) {
         uint256 baseAmount = base.balanceOf(address(this));
-
-        // Approve the curve to handle base tokens
         base.safeApprove(_curve, 0);
         base.safeApprove(_curve, type(uint256).max);
-
-        // Perform the origin swap
         Curve(payable(_curve)).originSwap(address(base), address(quote), baseAmount, 0, _deadline);
 
         uint256 quoteAmount = quote.balanceOf(address(this));
@@ -95,9 +91,6 @@ contract Zap is ReentrancyGuard{
 
         if (address(quote) == wETH && _toETH) {
             IWETH(wETH).withdraw(quoteAmount);
-
-            // Safely transfer ETH to the user
-            require(msg.sender != address(0), "zap/invalid-recipient");
             (bool success, ) = payable(msg.sender).call{value: quoteAmount}("");
             require(success, "zap/unzap-to-eth-failed");
         } else {
@@ -107,12 +100,8 @@ contract Zap is ReentrancyGuard{
         return quoteAmount;
     } else {
         uint256 quoteAmount = quote.balanceOf(address(this));
-
-        // Approve the curve to handle quote tokens
         quote.safeApprove(_curve, 0);
         quote.safeApprove(_curve, type(uint256).max);
-
-        // Perform the origin swap
         Curve(payable(_curve)).originSwap(address(quote), address(base), quoteAmount, 0, _deadline);
 
         uint256 baseAmount = base.balanceOf(address(this));
@@ -120,9 +109,6 @@ contract Zap is ReentrancyGuard{
 
         if (address(base) == wETH && _toETH) {
             IWETH(wETH).withdraw(baseAmount);
-
-            // Safely transfer ETH to the user
-            require(msg.sender != address(0), "zap/invalid-recipient");
             (bool success, ) = payable(msg.sender).call{value: baseAmount}("");
             require(success, "zap/unzap-to-eth-failed");
         } else {
